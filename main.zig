@@ -1,52 +1,57 @@
 const std = @import("std");
 
 pub fn main() !void {
-    var arr = [6]u8{ 10, 7, 8, 9, 1, 5 };
-    _ = &arr;
-    const n = arr.len;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-    quickSort(&arr, 0, n - 1);
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
 
-    std.debug.print("Sorted array:\n", .{});
-    for (arr) |el| {
-        std.debug.print("{d} ", .{el});
+    if (args.len != 2) {
+        std.debug.print("Please provide a python file. Shell not yet available.\n", .{});
+        return;
     }
-    std.debug.print("\n", .{});
-}
 
-fn quickSort(arr: *[6]u8, low: usize, high: usize) void {
-    if (low < high) {
-        const pi = partition(arr, low, high);
+    const file = try std.fs.cwd().openFile(args[1], .{});
+    defer file.close();
 
-        quickSort(arr, low, pi - 1);
-        quickSort(arr, pi + 1, high);
-    }
-}
+    var buf_reader = std.io.bufferedReader(file.reader());
+    const reader = buf_reader.reader();
 
-fn partition(arr: *[6]u8, low: usize, high: usize) usize {
-    const pivot = arr[high];
+    var line = std.ArrayList(u8).init(allocator);
+    defer line.deinit();
 
-    var i: ?usize = null;
-    if (low > 0) {
-        i = (low - 1);
-    }
-    var j = low;
-    while (j <= high) : (j += 1) {
-        if (arr[j] < pivot) {
-            if (i == null) {
-                i = 0;
-            } else {
-                i = i.? + 1;
+    const writer = line.writer();
+    var line_no: usize = 0;
+    while (reader.streamUntilDelimiter(writer, '\n', null)) {
+        // Clear the line so we can reuse it.
+        defer line.clearRetainingCapacity();
+        line_no += 1;
+
+        std.debug.print("{d}\t{s}\n", .{ line_no, line.items });
+    } else |err| switch (err) {
+        error.EndOfStream => { // end of file
+            if (line.items.len > 0) {
+                line_no += 1;
+                std.debug.print("{d}\t{s}\n", .{ line_no, line.items });
             }
-            swap(&arr[i.?], &arr[j]);
-        }
+        },
+        else => return err, // Propagate error
     }
-    swap(&arr[i.? + 1], &arr[high]);
-    return (i.? + 1);
+
+    std.debug.print("Total lines: {d}\n", .{line_no});
+
+    tokenize_line();
+    tokens_into_ast();
+    ast_into_action_tree();
+    execute_action_tree();
 }
 
-fn swap(p1: *u8, p2: *u8) void {
-    const temp = p1.*;
-    p1.* = p2.*;
-    p2.* = temp;
-}
+fn tokenize_line() void {}
+
+fn tokens_into_ast() void {}
+
+fn ast_into_action_tree() void {}
+
+fn execute_action_tree() void {}
