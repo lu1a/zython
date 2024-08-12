@@ -8,7 +8,7 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    if (args.len != 2) {
+    if (args.len < 2) {
         std.debug.print("Please provide a python file. Shell not yet available.\n", .{});
         return;
     }
@@ -29,26 +29,42 @@ pub fn main() !void {
         defer line.clearRetainingCapacity();
         line_no += 1;
 
-        std.debug.print("{d}\t{s}\n", .{ line_no, line.items });
+        std.debug.print("{s}\n", .{line.items});
+
+        try tokenize_line(&line, allocator);
+        tokens_into_ast();
+        ast_into_action_tree();
+        execute_action_tree();
     } else |err| switch (err) {
         error.EndOfStream => { // end of file
             if (line.items.len > 0) {
                 line_no += 1;
-                std.debug.print("{d}\t{s}\n", .{ line_no, line.items });
+                std.debug.print("{s}\n", .{line.items});
             }
         },
         else => return err, // Propagate error
     }
-
-    std.debug.print("Total lines: {d}\n", .{line_no});
-
-    tokenize_line();
-    tokens_into_ast();
-    ast_into_action_tree();
-    execute_action_tree();
 }
 
-fn tokenize_line() void {}
+fn tokenize_line(line: *std.ArrayList(u8), allocator: std.mem.Allocator) !void {
+    const func_scope = count_func_scope(line.items);
+    var tokenized_line = std.ArrayList([]u8).init(allocator);
+    defer tokenized_line.deinit();
+    try tokenized_line.append(line.items);
+    std.debug.print("scope in line {s}: {d}\n", .{ tokenized_line.items[0], func_scope });
+}
+
+fn count_func_scope(line: []u8) usize {
+    var starting_spaces_count: usize = 0;
+    for (line) |char| {
+        if (char == ' ') {
+            starting_spaces_count += 1;
+        } else {
+            break;
+        }
+    }
+    return @divFloor(starting_spaces_count, 4);
+}
 
 fn tokens_into_ast() void {}
 
