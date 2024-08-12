@@ -47,11 +47,67 @@ pub fn main() !void {
 }
 
 fn tokenize_line(line: *std.ArrayList(u8), allocator: std.mem.Allocator) !void {
+    if (line.items.len == 0) {
+        return;
+    }
     const func_scope = count_func_scope(line.items);
     var tokenized_line = std.ArrayList([]u8).init(allocator);
     defer tokenized_line.deinit();
-    try tokenized_line.append(line.items);
-    std.debug.print("scope in line {s}: {d}\n", .{ tokenized_line.items[0], func_scope });
+
+    var i: usize = 0;
+    while (i < line.items.len) {
+        const result = find_next_token(line.items[i..]);
+        if (result.walked_to_idx > 0) {
+            i += result.walked_to_idx;
+        } else {
+            i += 1;
+        }
+        try tokenized_line.append(result.token);
+    }
+    std.debug.print("{s}: >> scope level {d}\n", .{ tokenized_line.items, func_scope });
+}
+
+fn find_next_token(line: []u8) struct { token: []u8, token_type: usize, walked_to_idx: usize } {
+    var token_start_idx: usize = 0;
+    var how_far_walked: usize = 0;
+    for (line) |char| {
+        if (char == ' ') {
+            token_start_idx += 1;
+            how_far_walked += 1;
+        } else {
+            break;
+        }
+    }
+
+    // When token is a string
+    if (line[how_far_walked] == '"' or line[how_far_walked] == '\'') {
+        how_far_walked += 1;
+        while (how_far_walked < line.len) : (how_far_walked += 1) {
+            if (line[how_far_walked] == '"' or line[how_far_walked] == '\'') {
+                return .{ .token = line[token_start_idx .. how_far_walked + 1], .token_type = 0, .walked_to_idx = how_far_walked + 1 };
+            }
+        }
+    }
+
+    const special_chars = " :(),[]{}=+-*/%";
+
+    // When token is itself a special char
+    for (special_chars) |special_char| {
+        if (line[token_start_idx] == special_char) {
+            return .{ .token = line[token_start_idx .. how_far_walked + 1], .token_type = 1, .walked_to_idx = how_far_walked + 1 };
+        }
+    }
+
+    // When token is a var or other literal
+    while (how_far_walked < line.len) : (how_far_walked += 1) {
+        for (special_chars) |special_char| {
+            if (line[how_far_walked] == special_char) {
+                return .{ .token = line[token_start_idx..how_far_walked], .token_type = 2, .walked_to_idx = how_far_walked };
+            }
+        }
+    }
+
+    return .{ .token = line[token_start_idx..line.len], .token_type = 3, .walked_to_idx = how_far_walked };
 }
 
 fn count_func_scope(line: []u8) usize {
