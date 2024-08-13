@@ -29,9 +29,13 @@ pub fn main() !void {
         defer line.clearRetainingCapacity();
         line_no += 1;
 
-        std.debug.print("{s}\n", .{line.items});
-
-        try tokenize_line(&line, allocator);
+        const result = try tokenize_line(&line, allocator);
+        defer result.tokenized_line.deinit();
+        std.debug.print("{d} -- ", .{result.func_scope});
+        for (result.tokenized_line.items) |token| {
+            std.debug.print("{s}:'{s}' ", .{ @tagName(token.type), token.value });
+        }
+        std.debug.print("\n", .{});
         tokens_into_ast();
         ast_into_action_tree();
         execute_action_tree();
@@ -46,13 +50,18 @@ pub fn main() !void {
     }
 }
 
-fn tokenize_line(line: *std.ArrayList(u8), allocator: std.mem.Allocator) !void {
-    if (line.items.len == 0) {
-        return;
-    }
+const TokenType = enum { id, operation, number, string, unknown };
+const Token = struct {
+    value: []u8,
+    type: TokenType,
+};
+
+fn tokenize_line(line: *std.ArrayList(u8), allocator: std.mem.Allocator) !struct { tokenized_line: std.ArrayList(Token), func_scope: usize } {
+    var tokenized_line = std.ArrayList(Token).init(allocator);
     const func_scope = count_func_scope(line.items);
-    var tokenized_line = std.ArrayList([]u8).init(allocator);
-    defer tokenized_line.deinit();
+    if (line.items.len == 0) {
+        return .{ .tokenized_line = tokenized_line, .func_scope = func_scope };
+    }
 
     var i: usize = 0;
     while (i < line.items.len) {
@@ -64,10 +73,10 @@ fn tokenize_line(line: *std.ArrayList(u8), allocator: std.mem.Allocator) !void {
         }
         try tokenized_line.append(result.token);
     }
-    std.debug.print("{s}: >> scope level {d}\n", .{ tokenized_line.items, func_scope });
+    return .{ .tokenized_line = tokenized_line, .func_scope = func_scope };
 }
 
-fn find_next_token(line: []u8) struct { token: []u8, token_type: usize, walked_to_idx: usize } {
+fn find_next_token(line: []u8) struct { token: Token, walked_to_idx: usize } {
     var token_start_idx: usize = 0;
     var how_far_walked: usize = 0;
     for (line) |char| {
@@ -84,30 +93,60 @@ fn find_next_token(line: []u8) struct { token: []u8, token_type: usize, walked_t
         how_far_walked += 1;
         while (how_far_walked < line.len) : (how_far_walked += 1) {
             if (line[how_far_walked] == '"' or line[how_far_walked] == '\'') {
-                return .{ .token = line[token_start_idx .. how_far_walked + 1], .token_type = 0, .walked_to_idx = how_far_walked + 1 };
+                return .{ .token = .{ .value = line[token_start_idx .. how_far_walked + 1], .type = TokenType.string }, .walked_to_idx = how_far_walked + 1 };
             }
         }
     }
 
+    const number_chars = "0123456789.";
     const special_chars = " :(),[]{}=+-*/%";
 
-    // When token is itself a special char
+    // When token is a primitive operation
     for (special_chars) |special_char| {
         if (line[token_start_idx] == special_char) {
-            return .{ .token = line[token_start_idx .. how_far_walked + 1], .token_type = 1, .walked_to_idx = how_far_walked + 1 };
+            return .{ .token = .{ .value = line[token_start_idx .. how_far_walked + 1], .type = TokenType.operation }, .walked_to_idx = how_far_walked + 1 };
         }
     }
 
-    // When token is a var or other literal
+    // Test if token is a number and reset if not
+    var is_token_number = false;
+    var is_char_part_of_a_number = false;
+    while (how_far_walked < line.len) : (how_far_walked += 1) {
+        is_char_part_of_a_number = false;
+        is_token_number = false;
+        for (number_chars) |number_char| {
+            if (line[how_far_walked] == number_char) {
+                is_char_part_of_a_number = true;
+                break;
+            }
+        }
+        if (!is_char_part_of_a_number) {
+            is_token_number = false;
+            for (special_chars) |special_char| {
+                if (line[how_far_walked] == special_char) {
+                    is_token_number = true;
+                }
+            }
+            break;
+        } else {
+            is_token_number = true;
+        }
+    }
+    if (is_token_number) {
+        return .{ .token = .{ .value = line[token_start_idx..how_far_walked], .type = TokenType.number }, .walked_to_idx = how_far_walked };
+    }
+    how_far_walked = token_start_idx;
+
+    // Else token is a variable name
     while (how_far_walked < line.len) : (how_far_walked += 1) {
         for (special_chars) |special_char| {
             if (line[how_far_walked] == special_char) {
-                return .{ .token = line[token_start_idx..how_far_walked], .token_type = 2, .walked_to_idx = how_far_walked };
+                return .{ .token = .{ .value = line[token_start_idx..how_far_walked], .type = TokenType.id }, .walked_to_idx = how_far_walked };
             }
         }
     }
 
-    return .{ .token = line[token_start_idx..line.len], .token_type = 3, .walked_to_idx = how_far_walked };
+    return .{ .token = .{ .value = line[token_start_idx..line.len], .type = TokenType.id }, .walked_to_idx = how_far_walked };
 }
 
 fn count_func_scope(line: []u8) usize {
