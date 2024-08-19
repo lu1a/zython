@@ -31,12 +31,13 @@ pub fn main() !void {
 
         const result = try tokenize_line(&line, allocator);
         defer result.tokenized_line.deinit();
-        std.debug.print("{d} -- ", .{result.func_scope});
-        for (result.tokenized_line.items) |token| {
-            std.debug.print("{s}:'{s}' ", .{ @tagName(token.type), token.value });
+        const ast = try tokens_into_ast(result.tokenized_line, allocator);
+        defer ast.deinit();
+        for (ast.items) |node| {
+            std.debug.print("{d}:{s}:'{s}' ", .{ node.level, @tagName(node.token.type), node.token.value });
         }
         std.debug.print("\n", .{});
-        tokens_into_ast();
+
         ast_into_action_tree();
         execute_action_tree();
     } else |err| switch (err) {
@@ -50,10 +51,15 @@ pub fn main() !void {
     }
 }
 
-const TokenType = enum { id, operation, number, string, unknown };
+const TokenType = enum { grouping, id, operation, number, string, unknown };
 const Token = struct {
     value: []u8,
     type: TokenType,
+};
+
+const ASTNode = struct {
+    level: usize,
+    token: Token,
 };
 
 fn tokenize_line(line: *std.ArrayList(u8), allocator: std.mem.Allocator) !struct { tokenized_line: std.ArrayList(Token), func_scope: usize } {
@@ -99,10 +105,17 @@ fn find_next_token(line: []u8) struct { token: Token, walked_to_idx: usize } {
     }
 
     const number_chars = "0123456789.";
-    const special_chars = " :(),[]{}=+-*/%";
+    const grouping_chars = "()[]{},";
+    const operation_chars = " :=+-*/%";
+    const special_chars = grouping_chars ++ operation_chars;
 
+    for (grouping_chars) |special_char| {
+        if (line[token_start_idx] == special_char) {
+            return .{ .token = .{ .value = line[token_start_idx .. how_far_walked + 1], .type = TokenType.grouping }, .walked_to_idx = how_far_walked + 1 };
+        }
+    }
     // When token is a primitive operation
-    for (special_chars) |special_char| {
+    for (operation_chars) |special_char| {
         if (line[token_start_idx] == special_char) {
             return .{ .token = .{ .value = line[token_start_idx .. how_far_walked + 1], .type = TokenType.operation }, .walked_to_idx = how_far_walked + 1 };
         }
@@ -161,7 +174,46 @@ fn count_func_scope(line: []u8) usize {
     return @divFloor(starting_spaces_count, 4);
 }
 
-fn tokens_into_ast() void {}
+fn tokens_into_ast(tokens: std.ArrayList(Token), allocator: std.mem.Allocator) !std.ArrayList(ASTNode) {
+    // TODO: scrap this and start recursing
+    var ast = std.ArrayList(ASTNode).init(allocator);
+    var i: usize = 0;
+    while (i < tokens.items.len) : (i += 1) {
+        const level: usize = 0;
+        if (tokens.items[i].type == TokenType.id and (i + 1) < tokens.items.len and tokens.items[i + 1].type == TokenType.grouping) {
+            try ast.append(.{ .level = level, .token = tokens.items[i] });
+            var j: usize = i + 1;
+            const level_now: usize = 1;
+            var open_bracket_count: usize = 0;
+            var closed_bracket_count: usize = 0;
+            while (j < tokens.items.len and (open_bracket_count + closed_bracket_count == 0 or open_bracket_count > closed_bracket_count)) : (j += 1) {
+                if (std.mem.eql(u8, tokens.items[j].value, "(")) {
+                    open_bracket_count += 1;
+                }
+                if (std.mem.eql(u8, tokens.items[j].value, ")")) {
+                    closed_bracket_count += 1;
+                }
+                if (tokens.items[j].type != TokenType.grouping) {
+                    try ast.append(.{ .level = level_now, .token = tokens.items[j] });
+                }
+            }
+            i = j;
+        } else if (tokens.items[i].type == TokenType.id and (i + 1) < tokens.items.len and tokens.items[i + 1].type == TokenType.operation) {
+            try ast.append(.{ .level = level, .token = tokens.items[i + 1] });
+            const level_now: usize = 1;
+            try ast.append(.{ .level = level_now, .token = tokens.items[i] });
+            var j: usize = i + 1;
+            while (j < tokens.items.len) : (j += 1) {
+                try ast.append(.{ .level = level_now, .token = tokens.items[j] });
+            }
+            i = j;
+        }
+        if (i < tokens.items.len) {
+            try ast.append(.{ .level = level, .token = tokens.items[i] });
+        }
+    }
+    return ast;
+}
 
 fn ast_into_action_tree() void {}
 
