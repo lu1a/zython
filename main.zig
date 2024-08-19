@@ -34,7 +34,7 @@ pub fn main() !void {
 
         var ast = std.ArrayList(ASTNode).init(allocator);
         defer ast.deinit();
-        try tokens_into_ast(&result.tokenized_line, &ast, 0);
+        _ = try tokens_into_ast(&result.tokenized_line, &ast, 0, 0);
         for (ast.items) |node| {
             std.debug.print("{d}:{s}:'{s}' ", .{ node.level, @tagName(node.token.type), node.token.value });
         }
@@ -176,11 +176,28 @@ fn count_func_scope(line: []u8) usize {
     return @divFloor(starting_spaces_count, 4);
 }
 
-fn tokens_into_ast(tokens: *std.ArrayList(Token), ast: *std.ArrayList(ASTNode), idx: usize) !void {
-    if (idx >= tokens.items.len) return;
+fn tokens_into_ast(tokens: *std.ArrayList(Token), ast: *std.ArrayList(ASTNode), idx: usize, level: usize) !usize {
+    var i = idx;
+    if (i >= tokens.items.len) return i;
 
-    try ast.append(.{ .level = 0, .token = tokens.items[idx] });
-    try tokens_into_ast(tokens, ast, idx + 1);
+    if (tokens.items[i].type != TokenType.grouping) {
+        try ast.append(.{ .level = level, .token = tokens.items[i] });
+    }
+
+    if ((i + 1) < tokens.items.len and tokens.items[i].type == TokenType.id and std.mem.eql(u8, tokens.items[i + 1].value, "(")) {
+        i = try tokens_into_ast(tokens, ast, i + 1, level + 1);
+    }
+
+    if ((i + 1) < tokens.items.len and tokens.items[i + 1].type == TokenType.operation) {
+        _ = ast.pop();
+        try ast.append(.{ .level = level, .token = tokens.items[i + 1] });
+        try ast.append(.{ .level = level + 1, .token = tokens.items[i] });
+        i = try tokens_into_ast(tokens, ast, i + 2, level + 1);
+    }
+
+    i = try tokens_into_ast(tokens, ast, i + 1, level);
+
+    return i;
 }
 
 fn ast_into_action_tree() void {}
