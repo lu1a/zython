@@ -29,10 +29,12 @@ pub fn main() !void {
         defer line.clearRetainingCapacity();
         line_no += 1;
 
-        const result = try tokenize_line(&line, allocator);
+        var result = try tokenize_line(&line, allocator);
         defer result.tokenized_line.deinit();
-        const ast = try tokens_into_ast(result.tokenized_line, allocator);
+
+        var ast = std.ArrayList(ASTNode).init(allocator);
         defer ast.deinit();
+        try tokens_into_ast(&result.tokenized_line, &ast, 0);
         for (ast.items) |node| {
             std.debug.print("{d}:{s}:'{s}' ", .{ node.level, @tagName(node.token.type), node.token.value });
         }
@@ -174,45 +176,11 @@ fn count_func_scope(line: []u8) usize {
     return @divFloor(starting_spaces_count, 4);
 }
 
-fn tokens_into_ast(tokens: std.ArrayList(Token), allocator: std.mem.Allocator) !std.ArrayList(ASTNode) {
-    // TODO: scrap this and start recursing
-    var ast = std.ArrayList(ASTNode).init(allocator);
-    var i: usize = 0;
-    while (i < tokens.items.len) : (i += 1) {
-        const level: usize = 0;
-        if (tokens.items[i].type == TokenType.id and (i + 1) < tokens.items.len and tokens.items[i + 1].type == TokenType.grouping) {
-            try ast.append(.{ .level = level, .token = tokens.items[i] });
-            var j: usize = i + 1;
-            const level_now: usize = 1;
-            var open_bracket_count: usize = 0;
-            var closed_bracket_count: usize = 0;
-            while (j < tokens.items.len and (open_bracket_count + closed_bracket_count == 0 or open_bracket_count > closed_bracket_count)) : (j += 1) {
-                if (std.mem.eql(u8, tokens.items[j].value, "(")) {
-                    open_bracket_count += 1;
-                }
-                if (std.mem.eql(u8, tokens.items[j].value, ")")) {
-                    closed_bracket_count += 1;
-                }
-                if (tokens.items[j].type != TokenType.grouping) {
-                    try ast.append(.{ .level = level_now, .token = tokens.items[j] });
-                }
-            }
-            i = j;
-        } else if (tokens.items[i].type == TokenType.id and (i + 1) < tokens.items.len and tokens.items[i + 1].type == TokenType.operation) {
-            try ast.append(.{ .level = level, .token = tokens.items[i + 1] });
-            const level_now: usize = 1;
-            try ast.append(.{ .level = level_now, .token = tokens.items[i] });
-            var j: usize = i + 1;
-            while (j < tokens.items.len) : (j += 1) {
-                try ast.append(.{ .level = level_now, .token = tokens.items[j] });
-            }
-            i = j;
-        }
-        if (i < tokens.items.len) {
-            try ast.append(.{ .level = level, .token = tokens.items[i] });
-        }
-    }
-    return ast;
+fn tokens_into_ast(tokens: *std.ArrayList(Token), ast: *std.ArrayList(ASTNode), idx: usize) !void {
+    if (idx >= tokens.items.len) return;
+
+    try ast.append(.{ .level = 0, .token = tokens.items[idx] });
+    try tokens_into_ast(tokens, ast, idx + 1);
 }
 
 fn ast_into_action_tree() void {}
