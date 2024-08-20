@@ -40,8 +40,10 @@ pub fn main() !void {
         }
         std.debug.print("\n", .{});
 
-        ast_into_action_tree();
-        execute_action_tree();
+        var at = std.ArrayList(ActionNode).init(allocator);
+        defer at.deinit();
+        try ast_into_action_tree(&ast, &at, 0);
+        execute_action_tree(&at, 0);
     } else |err| switch (err) {
         error.EndOfStream => { // end of file
             if (line.items.len > 0) {
@@ -62,6 +64,13 @@ const Token = struct {
 const ASTNode = struct {
     level: usize,
     token: Token,
+};
+
+const ActionNode = struct {
+    astNode: ASTNode,
+    fn exec(self: *ActionNode) void {
+        std.debug.print("Stub: executed {s}\n", .{self.astNode.token.value});
+    }
 };
 
 fn tokenize_line(line: *std.ArrayList(u8), allocator: std.mem.Allocator) !struct { tokenized_line: std.ArrayList(Token), func_scope: usize } {
@@ -200,6 +209,16 @@ fn tokens_into_ast(tokens: *std.ArrayList(Token), ast: *std.ArrayList(ASTNode), 
     return i;
 }
 
-fn ast_into_action_tree() void {}
+fn ast_into_action_tree(ast: *std.ArrayList(ASTNode), at: *std.ArrayList(ActionNode), idx: usize) !void {
+    if (idx >= ast.items.len) return;
 
-fn execute_action_tree() void {}
+    try at.append(.{ .astNode = ast.items[idx] });
+    try ast_into_action_tree(ast, at, idx + 1);
+}
+
+fn execute_action_tree(at: *std.ArrayList(ActionNode), idx: usize) void {
+    if (idx >= at.items.len) return;
+
+    at.items[idx].exec();
+    execute_action_tree(at, idx + 1);
+}
