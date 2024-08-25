@@ -68,9 +68,7 @@ const ASTNode = struct {
 
 const ActionNode = struct {
     astNode: ASTNode,
-    fn exec(self: *ActionNode) void {
-        std.debug.print("Stub: executed {s}\n", .{self.astNode.token.value});
-    }
+    exec: *const fn (self: *ActionNode) void,
 };
 
 fn tokenize_line(line: *std.ArrayList(u8), allocator: std.mem.Allocator) !struct { tokenized_line: std.ArrayList(Token), func_scope: usize } {
@@ -212,13 +210,25 @@ fn tokens_into_ast(tokens: *std.ArrayList(Token), ast: *std.ArrayList(ASTNode), 
 fn ast_into_action_tree(ast: *std.ArrayList(ASTNode), at: *std.ArrayList(ActionNode), idx: usize) !void {
     if (idx >= ast.items.len) return;
 
-    try at.append(.{ .astNode = ast.items[idx] });
+    var exec = &exec_stub;
+    if (ast.items[idx].token.type == TokenType.number) {
+        exec = &exec_stub_for_numbers;
+    }
+    try at.append(.{ .astNode = ast.items[idx], .exec = exec });
     try ast_into_action_tree(ast, at, idx + 1);
 }
 
 fn execute_action_tree(at: *std.ArrayList(ActionNode), idx: usize) void {
     if (idx >= at.items.len) return;
 
-    at.items[idx].exec();
+    at.items[idx].exec(&at.items[idx]);
     execute_action_tree(at, idx + 1);
+}
+
+fn exec_stub(self: *ActionNode) void {
+    std.debug.print("Stub: executed {s}\n", .{self.astNode.token.value});
+}
+
+fn exec_stub_for_numbers(self: *ActionNode) void {
+    std.debug.print("Stub: executed different stub for {s}\n", .{self.astNode.token.value});
 }
