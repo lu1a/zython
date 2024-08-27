@@ -32,18 +32,26 @@ pub fn main() !void {
         var result = try tokenize_line(&line, allocator);
         defer result.tokenized_line.deinit();
 
-        var ast = std.ArrayList(ASTNode).init(allocator);
-        defer ast.deinit();
-        _ = try tokens_into_ast(&result.tokenized_line, &ast, 0, 0);
-        for (ast.items) |node| {
-            std.debug.print("{d}:{s}:'{s}' ", .{ node.level, @tagName(node.token.type), node.token.value });
-        }
-        std.debug.print("\n", .{});
+        // var ast = std.ArrayList(ASTNode).init(allocator);
+        // defer ast.deinit();
+        // _ = try tokens_into_ast(&result.tokenized_line, &ast, 0, 0);
+        // for (ast.items) |node| {
+        //     std.debug.print("{d}:{s}:'{s}' ", .{ node.level, @tagName(node.token.type), node.token.value });
+        // }
+        // std.debug.print("\n", .{});
 
-        var at = std.ArrayList(ActionNode).init(allocator);
-        defer at.deinit();
-        try ast_into_action_tree(&ast, &at, 0);
-        execute_action_tree(&at, 0);
+        if (result.tokenized_line.items.len == 0) continue;
+
+        var children = std.ArrayList(ASTNode2).init(allocator);
+        var ast: ASTNode2 = .{ .token = result.tokenized_line.items[0], .children = &children };
+        defer ast.deinit();
+        _ = try tokens_into_ast2(&result.tokenized_line, &ast, 1, allocator);
+        ast.print_children(0);
+
+        // var at = std.ArrayList(ActionNode).init(allocator);
+        // defer at.deinit();
+        // try ast_into_action_tree(&ast, &at, 0);
+        // execute_action_tree(&at, 0);
     } else |err| switch (err) {
         error.EndOfStream => { // end of file
             if (line.items.len > 0) {
@@ -55,7 +63,7 @@ pub fn main() !void {
     }
 }
 
-const TokenType = enum { grouping, id, operation, number, string, unknown };
+const TokenType = enum { grouping, id, operation, number, string };
 const Token = struct {
     value: []u8,
     type: TokenType,
@@ -64,6 +72,30 @@ const Token = struct {
 const ASTNode = struct {
     level: usize,
     token: Token,
+};
+
+const ASTNode2 = struct {
+    token: Token,
+    children: *std.ArrayList(ASTNode2),
+
+    pub fn deinit(self: *const ASTNode2) void {
+        if (self.children.items.len == 0) {
+            self.children.deinit();
+            return;
+        }
+        for (self.children.items) |child| {
+            child.deinit();
+        }
+        self.children.deinit();
+    }
+
+    pub fn print_children(self: *const ASTNode2, level: usize) void {
+        std.debug.print("{d}:{s}\n", .{ level, self.token.value });
+        if (self.children.items.len == 0) return;
+        for (self.children.items) |child| {
+            child.print_children(level + 1);
+        }
+    }
 };
 
 const ActionNode = struct {
@@ -203,6 +235,41 @@ fn tokens_into_ast(tokens: *std.ArrayList(Token), ast: *std.ArrayList(ASTNode), 
     }
 
     i = try tokens_into_ast(tokens, ast, i + 1, level);
+
+    return i;
+}
+
+fn tokens_into_ast2(tokens: *std.ArrayList(Token), ast: *ASTNode2, idx: usize, allocator: std.mem.Allocator) !usize {
+    var i = idx;
+    if (i >= tokens.items.len) return i;
+
+    var mutable_ast = ast.*;
+
+    if (tokens.items[i].type == TokenType.grouping) {
+        i = try tokens_into_ast2(tokens, &mutable_ast, i + 1, allocator);
+        return i;
+    }
+
+    var grandchildren = std.ArrayList(ASTNode2).init(allocator);
+    var child: ASTNode2 = .{ .token = tokens.items[i], .children = &grandchildren };
+    try mutable_ast.children.append(child);
+
+    std.debug.print("{s}\n", .{child.token.value});
+
+    if ((i + 1) < tokens.items.len and tokens.items[i].type == TokenType.id and std.mem.eql(u8, tokens.items[i + 1].value, "(")) {
+        i = try tokens_into_ast2(tokens, &child, i + 1, allocator);
+    }
+
+    if ((i + 1) < tokens.items.len and tokens.items[i + 1].type == TokenType.operation) {
+        _ = ast.children.pop();
+
+        try grandchildren.append(child);
+        var operationChild: ASTNode2 = .{ .token = tokens.items[i + 1], .children = &grandchildren };
+        try mutable_ast.children.append(operationChild);
+        i = try tokens_into_ast2(tokens, &operationChild, i + 2, allocator);
+    }
+
+    i = try tokens_into_ast2(tokens, &mutable_ast, i + 1, allocator);
 
     return i;
 }
