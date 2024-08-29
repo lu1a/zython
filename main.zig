@@ -32,22 +32,17 @@ pub fn main() !void {
         var result = try tokenize_line(&line, allocator);
         defer result.tokenized_line.deinit();
 
-        // var ast = std.ArrayList(ASTNode).init(allocator);
-        // defer ast.deinit();
-        // _ = try tokens_into_ast(&result.tokenized_line, &ast, 0, 0);
-        // for (ast.items) |node| {
-        //     std.debug.print("{d}:{s}:'{s}' ", .{ node.level, @tagName(node.token.type), node.token.value });
-        // }
-        // std.debug.print("\n", .{});
-
         if (result.tokenized_line.items.len == 0) continue;
 
+        std.debug.print("Gonna create children etc now", .{});
         var children = std.ArrayList(ASTNode2).init(allocator);
         var ast: ASTNode2 = .{ .token = result.tokenized_line.items[0], .children = &children };
-        defer ast.deinit();
+        defer ast_deinit(&ast);
         _ = try tokens_into_ast2(&result.tokenized_line, &ast, 1, allocator);
-        ast.print_children(0);
+        std.debug.print("About to print children...\n", .{});
+        print_children(&ast, 0);
 
+        std.debug.print("Didn't die here yet\n", .{});
         // var at = std.ArrayList(ActionNode).init(allocator);
         // defer at.deinit();
         // try ast_into_action_tree(&ast, &at, 0);
@@ -77,26 +72,25 @@ const ASTNode = struct {
 const ASTNode2 = struct {
     token: Token,
     children: *std.ArrayList(ASTNode2),
-
-    pub fn deinit(self: *const ASTNode2) void {
-        if (self.children.items.len == 0) {
-            self.children.deinit();
-            return;
-        }
-        for (self.children.items) |child| {
-            child.deinit();
-        }
-        self.children.deinit();
-    }
-
-    pub fn print_children(self: *const ASTNode2, level: usize) void {
-        std.debug.print("{d}:{s}\n", .{ level, self.token.value });
-        if (self.children.items.len == 0) return;
-        for (self.children.items) |child| {
-            child.print_children(level + 1);
-        }
-    }
 };
+
+fn print_children(self: *const ASTNode2, level: usize) void {
+    std.debug.print("{d}:{s}\n", .{ level, self.token.value });
+    for (self.children.items) |child| {
+        print_children(&child, level + 1);
+    }
+}
+
+fn ast_deinit(self: *const ASTNode2) void {
+    if (self.children.items.len == 0) {
+        self.children.deinit();
+        return;
+    }
+    for (self.children.items) |child| {
+        ast_deinit(&child);
+    }
+    self.children.deinit();
+}
 
 const ActionNode = struct {
     astNode: ASTNode,
@@ -215,34 +209,35 @@ fn count_func_scope(line: []u8) usize {
     return @divFloor(starting_spaces_count, 4);
 }
 
-fn tokens_into_ast(tokens: *std.ArrayList(Token), ast: *std.ArrayList(ASTNode), idx: usize, level: usize) !usize {
-    var i = idx;
-    if (i >= tokens.items.len) return i;
-
-    if (tokens.items[i].type != TokenType.grouping) {
-        try ast.append(.{ .level = level, .token = tokens.items[i] });
-    }
-
-    if ((i + 1) < tokens.items.len and tokens.items[i].type == TokenType.id and std.mem.eql(u8, tokens.items[i + 1].value, "(")) {
-        i = try tokens_into_ast(tokens, ast, i + 1, level + 1);
-    }
-
-    if ((i + 1) < tokens.items.len and tokens.items[i + 1].type == TokenType.operation) {
-        _ = ast.pop();
-        try ast.append(.{ .level = level, .token = tokens.items[i + 1] });
-        try ast.append(.{ .level = level + 1, .token = tokens.items[i] });
-        i = try tokens_into_ast(tokens, ast, i + 2, level + 1);
-    }
-
-    i = try tokens_into_ast(tokens, ast, i + 1, level);
-
-    return i;
-}
+//fn tokens_into_ast(tokens: *std.ArrayList(Token), ast: *std.ArrayList(ASTNode), idx: usize, level: usize) !usize {
+//    var i = idx;
+//    if (i >= tokens.items.len) return i;
+//
+//    if (tokens.items[i].type != TokenType.grouping) {
+//        try ast.append(.{ .level = level, .token = tokens.items[i] });
+//    }
+//
+//    if ((i + 1) < tokens.items.len and tokens.items[i].type == TokenType.id and std.mem.eql(u8, tokens.items[i + 1].value, "(")) {
+//        i = try tokens_into_ast(tokens, ast, i + 1, level + 1);
+//    }
+//
+//    if ((i + 1) < tokens.items.len and tokens.items[i + 1].type == TokenType.operation) {
+//        _ = ast.pop();
+//        try ast.append(.{ .level = level, .token = tokens.items[i + 1] });
+//        try ast.append(.{ .level = level + 1, .token = tokens.items[i] });
+//        i = try tokens_into_ast(tokens, ast, i + 2, level + 1);
+//    }
+//
+//    i = try tokens_into_ast(tokens, ast, i + 1, level);
+//
+//    return i;
+//}
 
 fn tokens_into_ast2(tokens: *std.ArrayList(Token), ast: *ASTNode2, idx: usize, allocator: std.mem.Allocator) !usize {
     var i = idx;
     if (i >= tokens.items.len) return i;
 
+    std.debug.print("{s}\n", .{tokens.items[i].value});
     var mutable_ast = ast.*;
 
     if (tokens.items[i].type == TokenType.grouping) {
@@ -254,23 +249,18 @@ fn tokens_into_ast2(tokens: *std.ArrayList(Token), ast: *ASTNode2, idx: usize, a
     var child: ASTNode2 = .{ .token = tokens.items[i], .children = &grandchildren };
     try mutable_ast.children.append(child);
 
-    std.debug.print("{s}\n", .{child.token.value});
-
     if ((i + 1) < tokens.items.len and tokens.items[i].type == TokenType.id and std.mem.eql(u8, tokens.items[i + 1].value, "(")) {
         i = try tokens_into_ast2(tokens, &child, i + 1, allocator);
-    }
-
-    if ((i + 1) < tokens.items.len and tokens.items[i + 1].type == TokenType.operation) {
-        _ = ast.children.pop();
+    } else if ((i + 1) < tokens.items.len and tokens.items[i + 1].type == TokenType.operation) {
+        _ = mutable_ast.children.pop();
 
         try grandchildren.append(child);
         var operationChild: ASTNode2 = .{ .token = tokens.items[i + 1], .children = &grandchildren };
         try mutable_ast.children.append(operationChild);
         i = try tokens_into_ast2(tokens, &operationChild, i + 2, allocator);
+    } else {
+        i = try tokens_into_ast2(tokens, &mutable_ast, i + 1, allocator);
     }
-
-    i = try tokens_into_ast2(tokens, &mutable_ast, i + 1, allocator);
-
     return i;
 }
 
