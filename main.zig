@@ -39,11 +39,15 @@ pub fn main() !void {
         var token_list: [MAX_TOKENS_PER_LINE]Token = undefined;
         line_no += 1;
 
-        tokenize_line(&line, &token_list);
-        for (token_list) |token| {
-            std.debug.print("{s}  ", .{token.value});
-        }
+        const token_count = tokenize_line(&line, &token_list);
         std.debug.print("\n", .{});
+        var children: [MAX_TOKENS_PER_LINE]ASTNode2 = undefined;
+        var ast: ASTNode2 = .{ .token = token_list[0], .children = &children, .children_len = 0 };
+        _ = tokens_into_ast(&token_list, &ast, 1, token_count, 0);
+        var at_children: [MAX_TOKENS_PER_LINE]ActionNode = undefined;
+        var at: ActionNode = .{ .token = ast.token, .exec = &exec_stub, .children_len = ast.children_len, .children = &at_children };
+        ast_into_action_tree(&ast, &at);
+        at.print(0);
     } else |err| switch (err) {
         error.EndOfStream => { // end of file
             if (line.items.len > 0) {
@@ -61,9 +65,38 @@ const Token = struct {
     type: TokenType,
 };
 
-fn tokenize_line(line: *std.ArrayList(u8), tokenized_line: *[MAX_TOKENS_PER_LINE]Token) void {
+const ASTNode2 = struct {
+    token: Token,
+    children: *[MAX_TOKENS_PER_LINE]ASTNode2,
+    children_len: usize,
+
+    fn print(self: *const ASTNode2, level: usize) void {
+        std.debug.print("{d}:{s}\n", .{ level, self.token.value });
+        for (self.children, 0..) |child, i| {
+            if (i >= self.children_len) break;
+            child.print(level + 1);
+        }
+    }
+};
+
+const ActionNode = struct {
+    token: Token,
+    exec: *const fn (self: *ActionNode) void,
+    children: *[MAX_TOKENS_PER_LINE]ActionNode,
+    children_len: usize,
+
+    fn print(self: *const ActionNode, level: usize) void {
+        std.debug.print("{d}:{s}\n", .{ level, self.token.value });
+        for (self.children, 0..) |child, i| {
+            if (i >= self.children_len) break;
+            child.print(level + 1);
+        }
+    }
+};
+
+fn tokenize_line(line: *std.ArrayList(u8), tokenized_line: *[MAX_TOKENS_PER_LINE]Token) usize {
     if (line.items.len == 0) {
-        return;
+        return 0;
     }
 
     var token_list_idx: usize = 0;
@@ -78,6 +111,7 @@ fn tokenize_line(line: *std.ArrayList(u8), tokenized_line: *[MAX_TOKENS_PER_LINE
         tokenized_line[token_list_idx] = result.token;
         token_list_idx += 1;
     }
+    return token_list_idx;
 }
 
 fn find_next_token(line: []u8) struct { token: Token, walked_to_idx: usize } {
@@ -165,4 +199,65 @@ fn find_next_token(line: []u8) struct { token: Token, walked_to_idx: usize } {
     var val: [128]u8 = undefined;
     std.mem.copyForwards(u8, &val, line[token_start_idx..line.len]);
     return .{ .token = .{ .value = val, .type = TokenType.id }, .walked_to_idx = how_far_walked };
+}
+
+fn tokens_into_ast(tokens: *[MAX_TOKENS_PER_LINE]Token, ast: *ASTNode2, idx: usize, token_count: usize, tokens_on_level_count: usize) usize {
+    var i = idx;
+    if (i >= token_count) return i;
+
+    if (tokens[i].type == TokenType.grouping) {
+        i = tokens_into_ast(tokens, ast, i + 1, token_count, tokens_on_level_count);
+        return i;
+    }
+    // std.debug.print("🎯{s} {s} {d}\n", .{ tokens[i].value, @tagName(tokens[i].type), tokens_on_level_count });
+
+    var grandchildren: [MAX_TOKENS_PER_LINE]ASTNode2 = undefined;
+    var child: ASTNode2 = .{ .token = tokens[i], .children = &grandchildren, .children_len = 0 };
+    ast.children[tokens_on_level_count] = child;
+    ast.children_len += 1;
+
+    if ((i + 1) < tokens.len and tokens[i].type == TokenType.id and std.mem.eql(u8, &tokens[i + 1].value, "(")) {
+        i = tokens_into_ast(tokens, &child, i + 1, token_count, 0);
+    } else if ((i + 1) < tokens.len and tokens[i + 1].type == TokenType.operation) {
+        ast.children[i] = undefined;
+        grandchildren[0] = child;
+        var operationChild: ASTNode2 = .{ .token = tokens[i + 1], .children = &grandchildren, .children_len = 1 };
+        ast.children[i] = operationChild;
+        i = tokens_into_ast(tokens, &operationChild, i + 2, token_count, 0);
+    } else {
+        i = tokens_into_ast(tokens, ast, i + 1, token_count, tokens_on_level_count + 1);
+    }
+    return i;
+}
+
+fn ast_into_action_tree(ast: *const ASTNode2, at: *ActionNode) void {
+    var exec = &exec_stub;
+    if (ast.token.type == TokenType.number) {
+        exec = &exec_stub_for_numbers;
+    }
+    at.token = ast.token;
+    at.exec = exec;
+    at.children_len = ast.children_len;
+
+    for (ast.children, 0..) |ast_child, i| {
+        if (i >= ast.children_len) break;
+        var dummy_grandchildren: [MAX_TOKENS_PER_LINE]ActionNode = undefined;
+        var at_child: ActionNode = .{ .token = ast_child.token, .exec = &exec_stub, .children_len = ast_child.children_len, .children = &dummy_grandchildren };
+        ast_into_action_tree(&ast_child, &at_child);
+    }
+}
+
+fn execute_action_tree(at: *std.ArrayList(ActionNode), idx: usize) void {
+    if (idx >= at.items.len) return;
+
+    at.items[idx].exec(&at.items[idx]);
+    execute_action_tree(at, idx + 1);
+}
+
+fn exec_stub(self: *ActionNode) void {
+    std.debug.print("Stub: executed {s}\n", .{self.token.value});
+}
+
+fn exec_stub_for_numbers(self: *ActionNode) void {
+    std.debug.print("Stub: executed different stub for {s}\n", .{self.token.value});
 }
