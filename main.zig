@@ -243,6 +243,7 @@ fn ast_into_action_tree(ast: *const ASTNode2, at: *ActionNode) void {
         if (i >= ast.children_len) break;
         var dummy_grandchildren: [MAX_TOKENS_PER_LINE]ActionNode = undefined;
         var at_child: ActionNode = .{ .token = ast_child.token, .exec = &exec_stub, .children_len = ast_child.children_len, .children = &dummy_grandchildren };
+        at.children[i] = at_child;
         ast_into_action_tree(&ast_child, &at_child);
     }
 }
