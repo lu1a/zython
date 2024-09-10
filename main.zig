@@ -40,14 +40,17 @@ pub fn main() !void {
         line_no += 1;
 
         const token_count = tokenize_line(&line, &token_list);
+        if (token_count == 0) continue;
         std.debug.print("\n", .{});
-        var children: [MAX_TOKENS_PER_LINE]ASTNode2 = undefined;
-        var ast: ASTNode2 = .{ .token = token_list[0], .children = &children, .children_len = 0 };
-        _ = tokens_into_ast(&token_list, &ast, 1, token_count, 0);
-        var at_children: [MAX_TOKENS_PER_LINE]ActionNode = undefined;
-        var at: ActionNode = .{ .token = ast.token, .exec = &exec_stub, .children_len = ast.children_len, .children = &at_children };
-        ast_into_action_tree(&ast, &at);
-        at.print(0);
+        var ast: ASTNode2 = .{ .token = .{ .value = undefined, .type = undefined }, .children = undefined, .children_len = 0 };
+        _ = tokens_into_ast2(&token_list, &ast, 0, token_count);
+        ast.print(0);
+        // std.debug.print("AAAA\n", .{});
+
+        // var at_children: [MAX_TOKENS_PER_LINE]ActionNode = undefined;
+        // var at: ActionNode = .{ .token = ast.token, .exec = &exec_stub, .children_len = ast.children_len, .children = &at_children };
+        // ast_into_action_tree(&ast, &at);
+        // at.print(0);
     } else |err| switch (err) {
         error.EndOfStream => { // end of file
             if (line.items.len > 0) {
@@ -201,31 +204,42 @@ fn find_next_token(line: []u8) struct { token: Token, walked_to_idx: usize } {
     return .{ .token = .{ .value = val, .type = TokenType.id }, .walked_to_idx = how_far_walked };
 }
 
-fn tokens_into_ast(tokens: *[MAX_TOKENS_PER_LINE]Token, ast: *ASTNode2, idx: usize, token_count: usize, tokens_on_level_count: usize) usize {
-    var i = idx;
+fn tokens_into_ast2(tokens: *[MAX_TOKENS_PER_LINE]Token, ast: *ASTNode2, idx: usize, token_count: usize) usize {
+    var i: usize = idx;
     if (i >= token_count) return i;
 
     if (tokens[i].type == TokenType.grouping) {
-        i = tokens_into_ast(tokens, ast, i + 1, token_count, tokens_on_level_count);
+        i = tokens_into_ast2(tokens, ast, i + 1, token_count);
         return i;
     }
-    // std.debug.print("🎯{s} {s} {d}\n", .{ tokens[i].value, @tagName(tokens[i].type), tokens_on_level_count });
+    // std.debug.print("🎯{s} {s} {d}\n", .{ tokens[i].value, @tagName(tokens[i].type), ast.children_len });
 
-    var grandchildren: [MAX_TOKENS_PER_LINE]ASTNode2 = undefined;
-    var child: ASTNode2 = .{ .token = tokens[i], .children = &grandchildren, .children_len = 0 };
-    ast.children[tokens_on_level_count] = child;
-    ast.children_len += 1;
+    if (i == 0) {
+        var dummy_children: [MAX_TOKENS_PER_LINE]ASTNode2 = undefined;
+        ast.children = &dummy_children;
+        ast.token = tokens[i];
+        i += 1;
+    }
 
-    if ((i + 1) < tokens.len and tokens[i].type == TokenType.id and std.mem.eql(u8, &tokens[i + 1].value, "(")) {
-        i = tokens_into_ast(tokens, &child, i + 1, token_count, 0);
-    } else if ((i + 1) < tokens.len and tokens[i + 1].type == TokenType.operation) {
-        ast.children[i] = undefined;
-        grandchildren[0] = child;
-        var operationChild: ASTNode2 = .{ .token = tokens[i + 1], .children = &grandchildren, .children_len = 1 };
-        ast.children[i] = operationChild;
-        i = tokens_into_ast(tokens, &operationChild, i + 2, token_count, 0);
-    } else {
-        i = tokens_into_ast(tokens, ast, i + 1, token_count, tokens_on_level_count + 1);
+    while (i < token_count) : (i += 1) {
+        if (tokens[i].type == TokenType.grouping) continue;
+
+        var dummy_grandchildren: [MAX_TOKENS_PER_LINE]ASTNode2 = undefined;
+        var child: ASTNode2 = .{ .token = tokens[i], .children = &dummy_grandchildren, .children_len = 0 };
+        ast.children[ast.children_len] = child;
+        ast.children_len += 1;
+
+        if (ast.token.type == TokenType.id and std.mem.eql(u8, &child.token.value, "(")) {
+            i = tokens_into_ast2(tokens, &child, i + 1, token_count);
+        } else if (child.token.type == TokenType.operation) {
+            // std.debug.print("THIS IS TRIGGERED\n", .{});
+            const tmp_token = child.token;
+            child.token = ast.token;
+            ast.token = tmp_token;
+            // std.debug.print("🗣️{s}\n", .{child.token.value});
+            ast.children[ast.children_len - 1] = child;
+            // i = tokens_into_ast2(tokens, &child, i + 1, token_count);
+        }
     }
     return i;
 }
