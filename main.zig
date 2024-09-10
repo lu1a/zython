@@ -41,16 +41,10 @@ pub fn main() !void {
 
         const token_count = tokenize_line(&line, &token_list);
         if (token_count == 0) continue;
-        std.debug.print("\n", .{});
         var ast: ASTNode2 = .{ .token = .{ .value = undefined, .type = undefined }, .children = undefined, .children_len = 0 };
         _ = tokens_into_ast2(&token_list, &ast, 0, token_count);
+        // ast.execute(0);
         ast.print(0);
-        // std.debug.print("AAAA\n", .{});
-
-        // var at_children: [MAX_TOKENS_PER_LINE]ActionNode = undefined;
-        // var at: ActionNode = .{ .token = ast.token, .exec = &exec_stub, .children_len = ast.children_len, .children = &at_children };
-        // ast_into_action_tree(&ast, &at);
-        // at.print(0);
     } else |err| switch (err) {
         error.EndOfStream => { // end of file
             if (line.items.len > 0) {
@@ -80,19 +74,12 @@ const ASTNode2 = struct {
             child.print(level + 1);
         }
     }
-};
 
-const ActionNode = struct {
-    token: Token,
-    exec: *const fn (self: *ActionNode) void,
-    children: *[MAX_TOKENS_PER_LINE]ActionNode,
-    children_len: usize,
-
-    fn print(self: *const ActionNode, level: usize) void {
-        std.debug.print("{d}:{s}\n", .{ level, self.token.value });
+    fn execute(self: *const ASTNode2, level: usize) void {
+        if (self.token.type == TokenType.number) std.debug.print("{d}:{s}:executed number stub", .{ level, self.token.value });
         for (self.children, 0..) |child, i| {
             if (i >= self.children_len) break;
-            child.print(level + 1);
+            child.execute(level + 1);
         }
     }
 };
@@ -233,46 +220,23 @@ fn tokens_into_ast2(tokens: *[MAX_TOKENS_PER_LINE]Token, ast: *ASTNode2, idx: us
             i = tokens_into_ast2(tokens, &child, i + 1, token_count);
         } else if (child.token.type == TokenType.operation) {
             // std.debug.print("THIS IS TRIGGERED\n", .{});
-            const tmp_token = child.token;
-            child.token = ast.token;
-            ast.token = tmp_token;
-            // std.debug.print("🗣️{s}\n", .{child.token.value});
-            ast.children[ast.children_len - 1] = child;
-            // i = tokens_into_ast2(tokens, &child, i + 1, token_count);
+            if (ast.children_len == 1) {
+                const tmp_token = child.token;
+                child.token = ast.token;
+                ast.token = tmp_token;
+                // std.debug.print("🗣️{s}\n", .{child.token.value});
+                ast.children[ast.children_len - 1] = child;
+            } else {
+                const tmp_child = ast.children[ast.children_len - 2];
+                ast.children[ast.children_len - 2] = ast.children[ast.children_len - 1];
+                ast.children[ast.children_len - 1] = tmp_child;
+                ast.children[ast.children_len - 1] = undefined;
+                ast.children_len -= 1;
+                ast.children[ast.children_len - 1].children[0] = tmp_child;
+                ast.children[ast.children_len - 1].children_len += 1;
+                i = tokens_into_ast2(tokens, &ast.children[ast.children_len - 1], i + 1, token_count);
+            }
         }
     }
     return i;
-}
-
-fn ast_into_action_tree(ast: *const ASTNode2, at: *ActionNode) void {
-    var exec = &exec_stub;
-    if (ast.token.type == TokenType.number) {
-        exec = &exec_stub_for_numbers;
-    }
-    at.token = ast.token;
-    at.exec = exec;
-    at.children_len = ast.children_len;
-
-    for (ast.children, 0..) |ast_child, i| {
-        if (i >= ast.children_len) break;
-        var dummy_grandchildren: [MAX_TOKENS_PER_LINE]ActionNode = undefined;
-        var at_child: ActionNode = .{ .token = ast_child.token, .exec = &exec_stub, .children_len = ast_child.children_len, .children = &dummy_grandchildren };
-        at.children[i] = at_child;
-        ast_into_action_tree(&ast_child, &at_child);
-    }
-}
-
-fn execute_action_tree(at: *std.ArrayList(ActionNode), idx: usize) void {
-    if (idx >= at.items.len) return;
-
-    at.items[idx].exec(&at.items[idx]);
-    execute_action_tree(at, idx + 1);
-}
-
-fn exec_stub(self: *ActionNode) void {
-    std.debug.print("Stub: executed {s}\n", .{self.token.value});
-}
-
-fn exec_stub_for_numbers(self: *ActionNode) void {
-    std.debug.print("Stub: executed different stub for {s}\n", .{self.token.value});
 }
